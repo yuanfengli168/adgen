@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adgen"
+version = "0.1.0"
+description = "One-line AI ad generator: text → posters + promo video"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "requests>=2.31",
+    "click>=8.1",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+ffmpeg = ["ffmpeg-python>=0.2"]
+dev = ["pytest>=7.0", "pytest-mock>=3.11"]
+
+[project.scripts]
+adgen = "adgen.cli:cli"
+
+[tool.setuptools.packages.find]
+include = ["adgen*"]
