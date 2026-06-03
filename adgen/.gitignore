@@ -11,4 +11,4 @@ output/
 *.jpg
 .env
 models/
-comfyui/
+comfyui/top-up-lah/
