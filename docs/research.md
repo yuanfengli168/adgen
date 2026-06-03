@@ -1,4 +1,4 @@
-# AdGen Research — Existing Tool Analysis
+# AdGen Research — Deep Dive
 
 ## Goal
 
@@ -11,247 +11,344 @@ All running on MacBook Pro M1 Max 64GB, no cloud needed.
 
 ---
 
-## Existing Tools Analysis
+## 1. ComfyUI API — How to Programmatically Control ComfyUI
 
-### 1. Creatify (creatify.ai)
-**What it does:** Input product URL → auto-generate video ads with AI voiceover, subtitles, b-roll.
+### API Overview
+ComfyUI runs a local HTTP server (default `localhost:8188`) with a REST API:
+- `POST /prompt` — Submit a workflow (JSON format) for execution
+- `GET /history/{prompt_id}` — Check execution status and get outputs
+- `GET /view` — Retrieve generated images
+- WebSocket at `ws://localhost:8188/ws` — Real-time progress updates
 
-**Strengths:**
-- Dead simple UX — paste URL, get video
-- Auto-fetches product info from website
-- Built-in AI voiceover (multiple languages)
-- Multiple format exports (16:9, 9:16, 1:1)
-- A/B testing built in
+### Workflow JSON Format
+ComfyUI workflows are node graphs serialized as JSON. Each node has:
+- `class_type` — The node type (e.g., "KSampler", "CLIPTextEncode")
+- `inputs` — Connected node IDs or direct values
+- `widgets` — UI-only values (need to be merged into inputs for API use)
 
-**Weaknesses:**
-- Cloud-only, SaaS pricing
-- Generic/templated output — many ads look the same
-- No local execution
-- Limited style control
-- Can't blend custom product images easily
+**Key insight:** When you save a workflow in ComfyUI UI, you get UI-format JSON. For API use, you need to use "Save (API Format)" which produces the correct structure.
 
-**What AdGen should adopt:**
-- "One input → full output" simplicity
-- Multiple format support
-- A/B variant generation (3 versions by default)
+### comfy-cli
+Official CLI tool from Comfy-Org:
+- `comfy install` — Install ComfyUI
+- `comfy run <workflow.json>` — Run a workflow from CLI
+- `comfy model download` — Download models from HF/CivitAI
+- Cross-platform (macOS, Linux, Windows)
+- Can manage custom nodes
 
-**What AdGen should improve:**
-- Full local execution (privacy, no subscription)
-- Custom style control (not locked to templates)
-- Product image fusion (IP-Adapter) — Creatify doesn't do this well
+**This is huge for AdGen:** Instead of building our own ComfyUI API client from scratch, we can use `comfy-cli` as the runtime layer. AdGen just needs to generate workflow JSONs and call `comfy run`.
 
----
+### ComfyUI-Manager
+Extension for managing custom nodes:
+- Install/remove/disable/enable custom nodes
+- Model management
+- Now officially maintained by Comfy-Org
 
-### 2. Arcads (arcads.ai)
-**What it does:** AI virtual actors deliver UGC-style ad scripts on camera.
-
-**Strengths:**
-- Very realistic AI avatars
-- UGC format works well on TikTok/Reels
-- Script-to-video pipeline
-- Multiple avatar/ethnicity options
-
-**Weaknesses:**
-- Cloud-only, expensive
-- Avatar uncanny valley at close inspection
-- Limited to "talking head" format
-- No poster/image generation
-
-**What AdGen should adopt:**
-- UGC vertical format (9:16) as default video output
-- Script-first approach (copy → video)
-
-**What AdGen should improve:**
-- Don't need avatars — can do motion graphics / animated posters instead
-- Poster + video combo (Arcads only does video)
+**For AdGen:** We need these custom nodes:
+1. `ComfyUI_IPAdapter_plus` — IP-Adapter support
+2. `ComfyUI-AnimateDiff-Evolved` — AnimateDiff support
+3. `ComfyUI-VideoHelperSuite` — Video encoding from frames
 
 ---
 
-### 3. Pencil AI (pencil.ai)
-**What it does:** Generate + test multiple ad variants, optimize for performance.
+## 2. Flux 1.dev — Image Generation
 
-**Strengths:**
-- Multi-variant generation (dozens of versions)
-- Built-in A/B testing with real metrics
-- Brand kit integration (fonts, colors, logo)
-- Iterative improvement based on performance data
+### Model Variants
+| Variant | Size | Steps | Quality | Speed on M1 Max |
+|---------|------|-------|---------|-----------------|
+| Flux 1.dev | ~24GB (full) | 28-50 | Best | ~30-60s/image |
+| Flux 1.dev FP8 | ~12GB | 28-50 | Slight degradation | ~15-25s/image |
+| Flux 1.schnell | ~12GB | 4 | Good (fast) | ~3-5s/image |
 
-**Weaknesses:**
-- Enterprise pricing
-- Requires ad platform integration (Meta, Google)
-- Generation quality is decent but not stunning
-- Not open source
+### ComfyUI Setup for Flux
+Required files:
+- `flux1-dev-fp8.safetensors` → `models/checkpoints/` (12GB)
+- `t5xxl_fp16.safetensors` → `models/text_encoders/` (9.5GB, recommended for 64GB)
+  - Or `t5xxl_fp8_e4m3fn_scaled.safetensors` for lower memory
+- `clip_l.safetensors` → `models/text_encoders/`
+- `ae.safetensors` (VAE) → `models/vae/`
 
-**What AdGen should adopt:**
-- Brand kit support (logo, colors, fonts)
-- Multi-variant generation
-- Brand consistency across outputs
+Total disk: ~25GB for FP8 setup
 
-**What AdGen should improve:**
-- Open source
-- Local execution
-- Higher quality base images (Flux > their gen)
+### Flux + IP-Adapter Compatibility
+**Confirmed:** InstantX released [FLUX.1-dev-IP-Adapter](https://huggingface.co/InstantX/FLUX.1-dev-IP-Adapter)
+- Uses `google/siglip-so400m-patch14-384` as image encoder (not CLIP)
+- Added into 38 single + 19 double transformer blocks
+- Works with Flux 1.dev
+- **But:** NOT yet integrated into ComfyUI_IPAdapter_plus (which is in maintenance mode)
+- Need custom ComfyUI node or diffusers-based approach
 
----
+**Decision:** For product fusion, we have two paths:
+1. **Path A (easier):** Use SDXL + IP-Adapter (well-tested, ComfyUI support)
+2. **Path B (higher quality):** Use Flux + InstantX IP-Adapter (needs custom node or direct diffusers call)
 
-### 4. AdCreative.ai
-**What it does:** Batch generate ad creatives with data-driven design suggestions.
+**Recommendation:** Start with Path A (SDXL + IP-Adapter) for MVP, add Flux IP-Adapter later.
 
-**Strengths:**
-- Very fast batch generation
-- CTR prediction scoring
-- Integration with ad platforms
-- Template library
-
-**Weaknesses:**
-- Template-based = repetitive
-- Low creative ceiling
-- Cloud-only
-- More "design automation" than "creative AI"
-
-**What AdGen should adopt:**
-- Speed (batch generation)
-- Score/rank outputs
-
-**What AdGen should improve:**
-- Not template-based — use generative AI
-- More creative freedom
-- Quality over quantity
+### Flux Kontext (Image Editing)
+New Flux model for image editing — could be useful for:
+- Adapting generated posters (change text, colors, layout)
+- Inpainting product images into scenes
+- Worth investigating for v2
 
 ---
 
-### 5. ComfyUI Ecosystem (open source)
-**What it does:** Node-based workflow builder for Stable Diffusion and friends.
+## 3. SDXL + IP-Adapter — Product Fusion
 
-**Strengths:**
-- Most flexible image gen tool
-- Huge model ecosystem (SDXL, Flux, IP-Adapter, ControlNet, AnimateDiff)
-- Local execution
-- Community workflows shared online
-- API access (can script it)
+### SDXL in ComfyUI
+- Native support, no extra setup
+- `sdxl_base_1.0.safetensors` → `models/checkpoints/` (6.5GB)
+- Faster than Flux, larger LoRA ecosystem
 
-**Weaknesses:**
-- Steep learning curve
-- No "one button" experience
-- Video gen workflows are complex to set up
-- No LLM integration for copywriting
-- No brand kit management
+### IP-Adapter for SDXL
+Available models (in `models/ipadapter/`):
+- `ip-adapter_sdxl.safetensors` — Standard, good for style transfer
+- `ip-adapter-plus_sdxl.safetensors` — Stronger, better for subject preservation
+- `ip-adapter-plus-face_sdxl.safetensors` — Face-specific
 
-**What AdGen should adopt:**
-- ComfyUI as backend engine
-- API-based workflow execution
-- Model flexibility
+Required:
+- `CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors` → `models/clip_vision/` (3.5GB)
 
-**What AdGen should improve:**
-- Wrap ComfyUI complexity behind simple CLI
-- Auto-select best models for each step
-- Add LLM copywriting layer
-- Add brand kit + product fusion
+### How IP-Adapter Works for AdGen
+1. Load product image (logo, product photo)
+2. Load SDXL checkpoint
+3. IP-Adapter encodes product image as conditioning
+4. Generate new image that incorporates the product
+5. Weight parameter (0.0-1.0) controls how strongly product influences output
 
----
+**Perfect for:** "Put my product/logo into a stylish ad scene"
 
-### 6. AnimateDiff Ecosystem
-**What it does:** Animate Stable Diffusion images using motion modules.
-
-**Strengths:**
-- Good quality short animations
-- Works with existing SDXL checkpoints
-- ControlNet support for guided motion
-- Can do 3-5 second clips reliably
-
-**Weaknesses:**
-- 15s is at the edge of what it does well
-- Motion can be inconsistent
-- Need careful prompt engineering
-- Slow on consumer hardware
-
-**What AdGen should consider:**
-- Use AnimateDiff for 3× 5s clips → stitch together for 15s
-- Or use Wan2.1 for end-to-end video gen (higher quality but slower)
+### ComfyUI_IPAdapter_plus Status
+⚠️ **Maintenance mode** (April 2025) — author no longer actively developing
+- Still works, but may lag behind ComfyUI updates
+- Alternative: use diffusers directly for IP-Adapter
 
 ---
 
-### 7. Wan2.1 (open source, by Alibaba)
-**What it does:** Text/image-to-video generation, open weights.
+## 4. Video Generation — AnimateDiff vs Wan2.1
 
-**Strengths:**
-- Higher quality than AnimateDiff for video
-- Better temporal consistency
-- Open weights, local execution
-- 8B version fits in 64GB RAM
+### AnimateDiff Evolved (ComfyUI)
+- Animates SDXL images using motion modules
+- Requires: `ComfyUI-AnimateDiff-Evolved` + `ComfyUI-VideoHelperSuite`
+- Motion models: `mm_sdxl_v10_beta.ckpt` or similar
+- Typically generates 16-32 frames at 512x512
+- ~2-5 min per 3-5s clip on M1 Max
 
-**Weaknesses:**
-- Very slow on M1 (minutes per 3s clip)
-- 15s would need 5× 3s clips stitched
-- Higher VRAM usage
-- Less community tooling than SD-based approaches
+**Pros:**
+- Consistent with SDXL pipeline (same model)
+- Good for subtle motion (pan, zoom, floating)
+- Well-integrated with ControlNet for guided motion
 
-**What AdGen should consider:**
-- Offer both paths: AnimateDiff (faster, lower quality) and Wan2.1 (slower, higher quality)
-- Let user choose via `--quality fast|high`
+**Cons:**
+- Short clips (3-5s reliable, longer gets inconsistent)
+- Lower resolution
+- Motion can be subtle/gentle — not dramatic
+
+### Wan 2.1 (ComfyUI Native)
+Native ComfyUI support since Feb 2025.
+
+Model variants:
+| Variant | Size | Quality | M1 Max Speed |
+|---------|------|---------|-------------|
+| T2V 1.3B | ~2.5GB | Decent | ~3-5 min/5s clip |
+| T2V 14B | ~28GB | Excellent | ~15-30 min/5s clip (fp8) |
+| I2V 14B 480p | ~28GB | Excellent | ~15-30 min/5s clip |
+
+Required files:
+- `umt5_xxl_fp8_e4m3fn_scaled.safetensors` → `models/text_encoders/`
+- `wan_2.1_vae.safetensors` → `models/vae/`
+- Diffusion model → `models/diffusion_models/`
+- For I2V: `clip_vision_h.safetensors` → `models/clip_vision/`
+
+**Key feature:** Image-to-Video (I2V) — can take a poster image and animate it!
+- Perfect for AdGen pipeline: poster → video
+- 14B I2V is the highest quality path
+
+### Wan 2.2
+Also now available with ComfyUI examples. Newer, likely better quality. Not yet fully benchmarked.
+
+### Video Strategy for AdGen
+
+**Option A: AnimateDiff (fast path)**
+```
+SDXL poster → AnimateDiff → 3× 5s clips → FFmpeg stitch → 15s
+```
+- Pros: Faster, consistent style, lower VRAM
+- Cons: Lower quality, subtle motion only
+
+**Option B: Wan2.1 I2V (quality path)**
+```
+SDXL poster → Wan2.1 I2V 14B → 3× 5s clips → FFmpeg stitch → 15s
+```
+- Pros: Higher quality, more dramatic motion, text-in-video
+- Cons: Much slower (45-90min for full 15s), needs fp8 model
+
+**Option C: Wan2.1 T2V 1.3B (budget path)**
+```
+Text prompt → Wan2.1 T2V 1.3B → 3× 5s clips → FFmpeg stitch → 15s
+```
+- Pros: Lightest model, decent quality
+- Cons: No poster-to-video consistency, lowest quality
+
+**Recommendation:**
+- MVP: Option A (AnimateDiff) — fast iteration
+- Quality mode: Option B (Wan2.1 I2V) — best results
+- Let user choose with `--quality fast|high`
 
 ---
 
-## Model Selection for AdGen
+## 5. LLM Integration — Copywriting
 
-| Pipeline Step | Primary Model | Alternative | Rationale |
-|---------------|--------------|-------------|-----------|
-| Copywriting | Qwen3 32B (Q4) | Llama 4 Scout 17B | Qwen3 multilingual (good for SG/Asia market) |
-| Poster image | Flux 1.dev | SDXL | Flux quality > SDXL, but SDXL faster + more LoRAs |
-| Product fusion | IP-Adapter SDXL | — | Only real option for zero-shot product insertion |
-| Video | AnimateDiff + SDXL | Wan2.1 8B | AnimateDiff faster; Wan2.1 for --quality high |
-| Upscale | RealESRGAN | — | Optional, for final output polish |
+### Ollama API
+- `POST http://localhost:11434/api/generate` — Generate text
+- `POST http://localhost:11434/api/chat` — Chat format
+- Simple HTTP, no SDK needed
+
+### Model Selection
+| Model | Size (Q4) | Quality | M1 Max Speed |
+|-------|-----------|---------|-------------|
+| Qwen3 32B | ~20GB | Best for multilingual/copy | ~15-20 tok/s |
+| Llama 4 Scout 17B | ~10GB | Good, fast | ~30-40 tok/s |
+| Gemma 3 27B | ~17GB | Good, multimodal | ~20-25 tok/s |
+| DeepSeek R1 distill 32B | ~20GB | Strong reasoning | ~15-20 tok/s |
+
+**Recommendation:** Qwen3 32B for best multilingual copy (SG/Asia market), Llama 4 Scout as fast fallback.
+
+### Prompt Engineering for Ad Copy
+AdGen needs the LLM to generate:
+1. 3 short ad taglines (5-10 words each)
+2. 3 image generation prompts (detailed, for Flux/SDXL)
+3. 3 video motion prompts (short, for AnimateDiff/Wan)
+4. Brand color/style suggestions
+
+All from a single product description input.
 
 ---
 
-## AdGen Pipeline Design
+## 6. Post-Processing — FFmpeg
+
+### Text Overlay
+```bash
+ffmpeg -i video.mp4 \
+  -vf "drawtext=text='Top Up Lah':fontsize=48:fontcolor=white:x=(w-text_w)/2:y=h-th-30" \
+  -codec:a copy output.mp4
+```
+
+### Stitch Clips
+```bash
+ffmpeg -f concat -safe 0 -i clips.txt -c copy output.mp4
+```
+
+### Add Background Music
+```bash
+ffmpeg -i video.mp4 -i music.mp3 -c:v copy -c:a aac -shortest output.mp4
+```
+
+**For AdGen:** FFmpeg handles all post-processing — text overlay, stitching, format conversion. No AI needed here.
+
+---
+
+## 7. Complete AdGen Pipeline (Updated Design)
 
 ```
-Input: "Product description text"
+Input: "Product description" [--brand brand.json] [--quality fast|high]
   │
-  ├─ Step 1: LLM generates
-  │   - 3 ad copy variations
-  │   - 3 image generation prompts (per copy)
-  │   - 3 video motion prompts (per copy)
+  ├─ Step 1: LLM (Ollama)
+  │   Generate: 3 taglines + 3 image prompts + 3 video prompts
   │
-  ├─ Step 2: ComfyUI generates posters
-  │   - Flux 1.dev (or SDXL) renders each prompt
-  │   - IP-Adapter fuses product image/logo
-  │   → 3 poster images
+  ├─ Step 2: Poster Generation (ComfyUI)
+  │   ├── fast:  SDXL + prompt → 3 posters
+  │   └── high:  Flux 1.dev FP8 + prompt → 3 posters
   │
-  ├─ Step 3: ComfyUI generates video
-  │   - AnimateDiff animates each poster (5s each)
-  │   - Or Wan2.1 generates from prompt + poster as reference
-  │   → 3 video clips
+  ├─ Step 3: Product Fusion (ComfyUI + IP-Adapter)
+  │   ├── fast:  SDXL + IP-Adapter → product in scene
+  │   └── high:  SDXL + IP-Adapter → product in scene (same for now)
+  │   Note: Flux IP-Adapter not yet in ComfyUI, use SDXL path
   │
-  └─ Step 4: Post-processing
-      - Stitch 3 clips → 15s video
-      - Add text overlay (ad copy) via FFmpeg
-      - Export: poster PNGs + video MP4
+  ├─ Step 4: Video Generation (ComfyUI)
+  │   ├── fast:  AnimateDiff + SDXL → 3× 5s clips
+  │   └── high:  Wan2.1 I2V 14B (fp8) → 3× 5s clips
+  │
+  └─ Step 5: Post-Processing (FFmpeg)
+      - Stitch 3 clips → 15s
+      - Add text overlay (tagline + brand name)
+      - Add brand color border/watermark
+      - Export: 3 PNGs + 1 MP4
       → output/
 ```
 
 ---
 
-## Open Questions
+## 8. Disk Space & Model Requirements
 
-1. **IP-Adapter + Flux compatibility** — IP-Adapter was built for SD/SDXL. Need to verify it works with Flux or if we need SDXL path for product fusion.
+### Minimum Setup (fast mode: SDXL + AnimateDiff)
+| Model | Size | Location |
+|-------|------|----------|
+| SDXL Base 1.0 | 6.5GB | checkpoints/ |
+| IP-Adapter SDXL Plus | 700MB | ipadapter/ |
+| CLIP Vision BigG | 3.5GB | clip_vision/ |
+| AnimateDiff SDXL | 1.5GB | animatediff_models/ |
+| Qwen3 32B Q4 | 20GB | Ollama |
+| **Total** | **~32GB** | |
 
-2. **AnimateDiff + SDXL vs Wan2.1** — Quality vs speed tradeoff. Need benchmarks on M1 Max.
+### Full Setup (high mode: + Flux + Wan2.1)
+| Model | Size | Location |
+|-------|------|----------|
+| Flux 1.dev FP8 | 12GB | checkpoints/ |
+| T5-XXL FP8 | 5GB | text_encoders/ |
+| CLIP-L | 250MB | text_encoders/ |
+| Flux VAE | 300MB | vae/ |
+| Wan2.1 I2V 14B FP8 | 15GB | diffusion_models/ |
+| UMT5-XXL FP8 | 5GB | text_encoders/ |
+| Wan VAE | 300MB | vae/ |
+| CLIP Vision H | 2GB | clip_vision/ |
+| **Additional** | **~40GB** | |
+| **Grand Total** | **~72GB** | |
 
-3. **Text overlay** — Should we render text via ComfyUI (ControlNet) or overlay via FFmpeg? FFmpeg is simpler and more reliable for ad copy.
+M1 Max 64GB RAM can run this but will need model swapping. FP8 models are essential.
 
-4. **Brand kit format** — How to specify: logo PNG, brand colors, fonts. JSON config file?
+---
 
-5. **ComfyUI API stability** — ComfyUI's API is unofficial. May need to pin a specific version or use [comfy-cli](https://github.com/Comfy-Org/comfy-cli).
+## 9. Key Technical Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| ComfyUI interface | comfy-cli + direct API | Best of both worlds |
+| Image gen default | SDXL | Faster, IP-Adapter support mature |
+| Image gen quality | Flux 1.dev FP8 | Better quality when patient |
+| Product fusion | SDXL + IP-Adapter Plus | Only mature option currently |
+| Video gen fast | AnimateDiff + SDXL | Quick iteration |
+| Video gen quality | Wan2.1 I2V 14B FP8 | Best quality, poster→video |
+| Copywriting | Ollama + Qwen3 32B | Multilingual, strong copy |
+| Text overlay | FFmpeg | Simple, reliable, no AI |
+| Brand kit | JSON config file | Portable, simple |
+
+---
+
+## 10. Open Questions & Risks
+
+1. **Flux IP-Adapter in ComfyUI** — InstantX released weights but ComfyUI_IPAdapter_plus is in maintenance mode. May need custom node or direct diffusers call.
+
+2. **Wan2.1 I2V on M1 Max** — 14B FP8 needs ~28GB VRAM. Apple Silicon shares RAM so 64GB should work, but speed is unknown. Need real benchmarks.
+
+3. **AnimateDiff quality** — May not be dramatic enough for "promo video" feel. Need to test with motion ControlNet.
+
+4. **ComfyUI API stability** — API format changes between versions. Should pin ComfyUI version in docs.
+
+5. **Model download automation** — First-time setup needs ~32-72GB of models. Should provide `adgen setup` command that downloads everything.
+
+6. **Text rendering in video** — Wan2.1 can generate text in video (Chinese + English). Could we use this instead of FFmpeg overlay for more natural-looking ad copy?
 
 ---
 
 ## Next Steps
 
-1. Prototype ComfyUI API calls from Python
-2. Test Flux + IP-Adapter pipeline on M1 Max
-3. Test AnimateDiff + SDXL pipeline on M1 Max
-4. Build CLI scaffold with pipeline orchestration
-5. Add brand kit support
-6. Add web UI (optional, v2)
+1. ✅ Research complete
+2. Build CLI scaffold with pipeline orchestrator
+3. Implement Ollama integration (Step 1)
+4. Create SDXL + IP-Adapter workflow JSON templates
+5. Create AnimateDiff workflow JSON template
+6. Implement ComfyUI API client (or comfy-cli wrapper)
+7. Implement FFmpeg post-processing
+8. End-to-end test
+9. Add Flux + Wan2.1 support (quality mode)
+10. Add brand kit support
