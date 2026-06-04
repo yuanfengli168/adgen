@@ -6,6 +6,17 @@ from pathlib import Path
 from typing import Optional
 
 
+def _escape_drawtext(text: str) -> str:
+    """Escape characters that are special inside an FFmpeg drawtext filter argument."""
+    # Order matters: escape backslash first.
+    return (
+        text.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("'", "\\'")
+        .replace("%", "\\%")
+    )
+
+
 class FFmpegWrapper:
     """Wrapper around FFmpeg CLI for video post-processing."""
 
@@ -37,7 +48,7 @@ class FFmpegWrapper:
         x_expr = "(w-text_w)/2"
 
         drawtext = (
-            f"drawtext=text='{text}':fontsize={fontsize}:fontcolor={fontcolor}"
+            f"drawtext=text='{_escape_drawtext(text)}':fontsize={fontsize}:fontcolor={fontcolor}"
             f":x={x_expr}:y={y_expr}"
         )
         if fontfile:
@@ -47,7 +58,7 @@ class FFmpegWrapper:
             "ffmpeg", "-y",
             "-i", str(video_path),
             "-vf", drawtext,
-            "-codec:a", "copy",
+            "-an",
             str(output_path),
         ]
 

@@ -67,12 +67,12 @@ class ComfyUIClient:
                 history = resp.json()
                 if prompt_id in history:
                     entry = history[prompt_id]
-                    # Check for errors
-                    if entry.get("status", {}).get("status_str") == "error":
-                        raise RuntimeError(f"ComfyUI execution error: {entry['status']}")
-                    # Check if completed
-                    outputs = entry.get("outputs", {})
-                    if outputs or entry.get("status", {}).get("completed", False):
+                    status = entry.get("status", {})
+                    if status.get("status_str") == "error":
+                        raise RuntimeError(f"ComfyUI execution error: {status}")
+                    # Only return when fully completed; partial outputs may exist
+                    # mid-run for multi-node workflows (e.g. AnimateDiff + VideoCombine).
+                    if status.get("completed") is True or status.get("status_str") == "success":
                         return entry
 
             time.sleep(self.poll_interval)
@@ -123,11 +123,37 @@ class ComfyUIClient:
                 except requests.RequestException as e:
                     raise RuntimeError(f"Failed to download image {filename}: {e}") from e
 
-                save_path = out_dir / filename
+                save_path = out_dir / f"{prompt_id}_{filename}"
                 save_path.write_bytes(resp.content)
                 saved.append(save_path)
 
         return saved
+
+    def upload_image(self, image_path: str, subfolder: str = "", overwrite: bool = True) -> str:
+        """Upload an image to ComfyUI's input directory. Returns the server-side filename."""
+        path = Path(image_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Image not found: {image_path}")
+
+        with open(path, "rb") as f:
+            files = {"image": (path.name, f, "application/octet-stream")}
+            data = {"subfolder": subfolder, "overwrite": "true" if overwrite else "false"}
+            try:
+                resp = requests.post(
+                    f"{self.base_url}/upload/image",
+                    files=files,
+                    data=data,
+                    timeout=self.timeout,
+                )
+                resp.raise_for_status()
+            except requests.RequestException as e:
+                raise RuntimeError(f"Failed to upload image {path.name}: {e}") from e
+
+        result = resp.json()
+        name = result.get("name")
+        if not name:
+            raise RuntimeError(f"Upload response missing 'name': {result}")
+        return name
 
     @staticmethod
     def _inject_params(workflow: dict, params: dict) -> dict:

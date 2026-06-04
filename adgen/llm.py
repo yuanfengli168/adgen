@@ -1,14 +1,14 @@
 """Ollama LLM integration for ad copywriting."""
 
 import json
+import re
 import requests
 from typing import Optional
 
 
 COPY_PROMPT_TEMPLATE = """You are an expert advertising copywriter. Given a product description, generate compelling ad content.
 
-Product: {product_description}
-{brand_context}
+Product: {product_description}{brand_context}
 
 Generate exactly 3 variations. For each variation, provide:
 1. A short tagline (5-10 words)
@@ -30,7 +30,7 @@ Do not include any other text outside the JSON."""
 class LLMClient:
     """Client for Ollama HTTP API."""
 
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "qwen3:32b", timeout: int = 120):
+    def __init__(self, base_url: str = "http://localhost:11434", model: str = "qwen3:32b", timeout: int = 300):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
@@ -60,9 +60,10 @@ class LLMClient:
 
         Returns dict with keys: taglines, image_prompts, video_prompts.
         """
+        brand_block = f"\n{brand_context}" if brand_context else ""
         prompt = COPY_PROMPT_TEMPLATE.format(
             product_description=product_description,
-            brand_context=brand_context,
+            brand_context=brand_block,
         )
 
         try:
@@ -72,6 +73,7 @@ class LLMClient:
                     "model": self.model,
                     "prompt": prompt,
                     "stream": False,
+                    "format": "json",
                     "options": {"temperature": 0.8},
                 },
                 timeout=self.timeout,
@@ -83,28 +85,31 @@ class LLMClient:
         data = resp.json()
         raw_response = data.get("response", "")
 
-        # Extract JSON from response (may have surrounding text)
         return self._parse_json_response(raw_response)
 
     def _parse_json_response(self, text: str) -> dict:
-        """Parse JSON from LLM response, handling possible markdown fences."""
-        # Try to find JSON block
+        """Parse JSON from LLM response, tolerating markdown fences and surrounding prose."""
         text = text.strip()
 
-        # Remove markdown code fences if present
-        if "```json" in text:
-            text = text.split("```json", 1)[1]
-            text = text.split("```", 1)[0]
-        elif "```" in text:
-            text = text.split("```", 1)[1]
-            text = text.split("```", 1)[0]
+        # Strip ```json ... ``` or ``` ... ``` fences if present.
+        if "```" in text:
+            fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+            if fenced:
+                text = fenced.group(1)
 
         text = text.strip()
 
         try:
             result = json.loads(text)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to parse LLM JSON response: {e}\nRaw: {text[:500]}") from e
+        except json.JSONDecodeError:
+            # Fall back to extracting the first balanced JSON object.
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if not match:
+                raise ValueError(f"Failed to parse LLM JSON response.\nRaw: {text[:500]}")
+            try:
+                result = json.loads(match.group(0))
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Failed to parse LLM JSON response: {e}\nRaw: {text[:500]}") from e
 
         # Validate structure
         required_keys = {"taglines", "image_prompts", "video_prompts"}
@@ -113,10 +118,10 @@ class LLMClient:
 
         # Ensure 3 variations
         for key in ["taglines", "image_prompts", "video_prompts"]:
-            if len(result[key]) < 3:
-                # Pad with duplicates if fewer than 3
-                while len(result[key]) < 3:
-                    result[key].append(result[key][-1])
+            if not result[key]:
+                raise ValueError(f"Empty list for key '{key}' in LLM response")
+            while len(result[key]) < 3:
+                result[key].append(result[key][-1])
             result[key] = result[key][:3]
 
         return result

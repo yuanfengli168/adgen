@@ -1,4 +1,4 @@
-"""Pipeline orchestrator —串联 LLM → ComfyUI → FFmpeg 所有步骤."""
+"""Pipeline orchestrator: LLM -> ComfyUI -> FFmpeg."""
 
 import json
 import time
@@ -12,8 +12,21 @@ from adgen.postprocess import FFmpegWrapper
 from adgen.brand import BrandKit
 
 
-# Workflow template paths (relative to package)
-WORKFLOWS_DIR = Path(__file__).parent.parent / "workflows"
+# Workflow templates ship inside the package.
+WORKFLOWS_DIR = Path(__file__).parent / "workflows"
+
+
+def _find_positive_prompt_node(workflow: dict) -> str | None:
+    """Return the node id of the positive CLIPTextEncode referenced by KSampler.
+
+    Avoids the trap of also overwriting the negative prompt node.
+    """
+    for node in workflow.values():
+        if node.get("class_type") in ("KSampler", "KSamplerAdvanced"):
+            positive = node.get("inputs", {}).get("positive")
+            if isinstance(positive, list) and positive:
+                return str(positive[0])
+    return None
 
 
 class Pipeline:
@@ -114,36 +127,52 @@ class Pipeline:
         params = {}
         seeds = [42, 137, 2024]
 
+        positive_node_id = _find_positive_prompt_node(workflow)
         for node_id, node in workflow.items():
             if node.get("class_type") == "KSampler":
-                params[node_id] = {"seed": seeds[index % len(seeds)]}
-            elif node.get("class_type") in ("CLIPTextEncode", "CLIPTextEncodeSDXL"):
-                inputs = node.get("inputs", {})
-                # Positive prompt node typically has no reference to another node for text
-                if "text" in inputs and isinstance(inputs["text"], str):
-                    params.setdefault(node_id, {})["text"] = prompt
+                params.setdefault(node_id, {})["seed"] = seeds[index % len(seeds)]
+        if positive_node_id is not None:
+            params.setdefault(positive_node_id, {})["text"] = prompt
 
         return params
 
     def _fuse_products(self, poster_paths: list[Path]) -> list[Path]:
-        """Fuse product images into posters using IP-Adapter."""
+        """Fuse product images into posters using IP-Adapter.
+
+        Uploads both the product image and the poster to ComfyUI's input directory,
+        then routes the product through the IPAdapter LoadImage node. The poster is
+        currently uploaded for downstream workflow extension; full poster->latent
+        conditioning requires a VAEEncode-based workflow (TODO).
+        """
         workflow_file = WORKFLOWS_DIR / "sdxl_ipadapter.json"
 
         if not workflow_file.exists():
             click.echo("   ⚠️  IP-Adapter workflow not found, skipping fusion")
             return poster_paths
 
-        workflow = ComfyUIClient.load_workflow(str(workflow_file))
-        product_image = self.brand.product_images[0] if self.brand and self.brand.product_images else None
-        fused = []
+        if not (self.brand and self.brand.product_images):
+            return poster_paths
 
+        workflow = ComfyUIClient.load_workflow(str(workflow_file))
+        product_image = self.brand.product_images[0]
+        try:
+            product_uploaded = self.comfy.upload_image(product_image)
+        except Exception as e:
+            click.echo(f"   \u26a0\ufe0f  Failed to upload product image: {e}; skipping fusion")
+            return poster_paths
+
+        fused = []
         for i, poster in enumerate(poster_paths):
-            click.echo(f"   Fusing product {i+1}/3...")
+            click.echo(f"   Fusing product {i+1}/{len(poster_paths)}...")
+            try:
+                self.comfy.upload_image(str(poster))
+            except Exception as e:
+                click.echo(f"   \u26a0\ufe0f  Failed to upload poster {poster.name}: {e}")
+
             params = {}
-            # Override product image path and prompt
             for node_id, node in workflow.items():
-                if node.get("class_type") == "LoadImage" and product_image:
-                    params.setdefault(node_id, {})["image"] = product_image
+                if node.get("class_type") == "LoadImage":
+                    params.setdefault(node_id, {})["image"] = product_uploaded
                 elif node.get("class_type") == "KSampler":
                     params.setdefault(node_id, {})["seed"] = 42 + i
 
@@ -157,29 +186,28 @@ class Pipeline:
     def _generate_videos(self, video_prompts: list[str]) -> list[Path]:
         """Generate video clips via ComfyUI."""
         if self.quality == "high":
-            click.echo("   ⚠️  High quality video (Wan2.1) not yet implemented, using AnimateDiff")
+            click.echo("   \u26a0\ufe0f  High quality video (Wan2.1) not yet implemented, using AnimateDiff")
 
         workflow_file = WORKFLOWS_DIR / "animatediff_video.json"
 
         if not workflow_file.exists():
-            click.echo("   ⚠️  Video workflow not found, using placeholder")
+            click.echo("   \u26a0\ufe0f  Video workflow not found, using placeholder")
             return self._create_placeholder_videos(video_prompts)
 
         workflow = ComfyUIClient.load_workflow(str(workflow_file))
         clip_paths = []
+        seeds = [42, 137, 2024]
+        positive_node_id = _find_positive_prompt_node(workflow)
 
         for i, vprompt in enumerate(video_prompts):
-            click.echo(f"   Generating clip {i+1}/3...")
+            click.echo(f"   Generating clip {i+1}/{len(video_prompts)}...")
 
             params = {}
-            seeds = [42, 137, 2024]
             for node_id, node in workflow.items():
                 if node.get("class_type") == "KSampler":
-                    params.setdefault(node_id, {})["seed"] = seeds[i]
-                elif node.get("class_type") in ("CLIPTextEncode", "CLIPTextEncodeSDXL"):
-                    inputs = node.get("inputs", {})
-                    if "text" in inputs and isinstance(inputs["text"], str):
-                        params.setdefault(node_id, {})["text"] = vprompt
+                    params.setdefault(node_id, {})["seed"] = seeds[i % len(seeds)]
+            if positive_node_id is not None:
+                params.setdefault(positive_node_id, {})["text"] = vprompt
 
             prompt_id = self.comfy.submit_workflow(workflow, params)
             self.comfy.wait_for_result(prompt_id, max_wait=600)

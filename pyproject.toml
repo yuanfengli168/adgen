@@ -27,3 +27,6 @@ adgen = "adgen.cli:cli"
 
 [tool.setuptools.packages.find]
 include = ["adgen*"]
+
+[tool.setuptools.package-data]
+adgen = ["workflows/*.json"]
