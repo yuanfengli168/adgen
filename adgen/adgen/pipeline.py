@@ -194,6 +194,10 @@ class Pipeline:
             click.echo("   ⚠️  FFmpeg not available, skipping post-processing")
             return
 
+        if not clip_paths:
+            click.echo("   ⚠️  No video clips to process, skipping post-processing")
+            return
+
         videos_dir = self.output_dir / "videos"
         videos_dir.mkdir(parents=True, exist_ok=True)
 

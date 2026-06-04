@@ -129,7 +129,8 @@ class ComfyUIClient:
 
         return saved
 
-    def _inject_params(self, workflow: dict, params: dict) -> dict:
+    @staticmethod
+    def _inject_params(workflow: dict, params: dict) -> dict:
         """Inject parameters into workflow nodes.
 
         Params is a dict mapping node IDs to their input overrides.

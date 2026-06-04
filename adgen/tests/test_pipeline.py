@@ -97,7 +97,7 @@ class TestComfyUIClient:
             "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "old prompt"}},
         }
         params = {"3": {"seed": 137}, "6": {"text": "new prompt"}}
-        result = ComfyUIClient._inject_params(None, workflow, params)
+        result = ComfyUIClient._inject_params(workflow, params)
         assert result["3"]["inputs"]["seed"] == 137
         assert result["6"]["inputs"]["text"] == "new prompt"
         # Original should not be modified

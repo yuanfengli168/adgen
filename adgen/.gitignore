@@ -1,6 +1,10 @@
+# Inner package .gitignore — kept in sync with parent /adgen/.gitignore
+# This file is redundant when the parent .gitignore is present, but kept
+# for safety if the inner package is ever used as a standalone project.
+# See ../.gitignore for the canonical list.
 .DS_Store
 __pycache__/
-*.pyc
+*.py[cod]
 *.egg-info/
 dist/
 build/
@@ -11,4 +15,4 @@ output/
 *.jpg
 .env
 models/
-comfyui/top-up-lah/
+comfyui/

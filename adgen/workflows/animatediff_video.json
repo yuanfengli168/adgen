@@ -2,7 +2,7 @@
   "4": {
     "class_type": "CheckpointLoaderSimple",
     "inputs": {
-      "ckpt_name": "sd_xl_base_1.0.safetensors"
+      "ckpt_name": "SDXL/sd_xl_base_1.0.safetensors"
     }
   },
   "5": {
@@ -65,6 +65,7 @@
       "format": "video/h264-mp4",
       "pingpong": false,
       "save_output": true,
+      "loop_count": 0,
       "filename_prefix": "adgen/video"
     }
   }
