@@ -1,4 +1,4 @@
-"""Pipeline orchestrator: LLM -> ComfyUI -> FFmpeg."""
+"""Pipeline orchestrator —串联 LLM → ComfyUI → FFmpeg 所有步骤."""
 
 import json
 import time
@@ -12,21 +12,8 @@ from adgen.postprocess import FFmpegWrapper
 from adgen.brand import BrandKit
 
 
-# Workflow templates ship inside the package.
-WORKFLOWS_DIR = Path(__file__).parent / "workflows"
-
-
-def _find_positive_prompt_node(workflow: dict) -> str | None:
-    """Return the node id of the positive CLIPTextEncode referenced by KSampler.
-
-    Avoids the trap of also overwriting the negative prompt node.
-    """
-    for node in workflow.values():
-        if node.get("class_type") in ("KSampler", "KSamplerAdvanced"):
-            positive = node.get("inputs", {}).get("positive")
-            if isinstance(positive, list) and positive:
-                return str(positive[0])
-    return None
+# Workflow template paths (relative to package)
+WORKFLOWS_DIR = Path(__file__).parent.parent / "workflows"
 
 
 class Pipeline:
@@ -82,7 +69,7 @@ class Pipeline:
 
         # Step 4: Generate video clips
         click.echo("🎬 Step 4/5: Generating video clips...")
-        clip_paths = self._generate_videos(copy["video_prompts"])
+        clip_paths = self._generate_videos(copy["video_prompts"], fused_paths)
         click.echo(f"   Generated {len(clip_paths)} clips")
         click.echo()
 
@@ -96,11 +83,7 @@ class Pipeline:
 
     def _generate_posters(self, image_prompts: list[str], taglines: list[str]) -> list[Path]:
         """Generate poster images via ComfyUI."""
-        if self.quality == "high":
-            workflow_file = WORKFLOWS_DIR / "sdxl_poster.json"  # TODO: flux workflow
-            click.echo("   ⚠️  High quality mode uses SDXL for now (Flux workflow not yet implemented)")
-        else:
-            workflow_file = WORKFLOWS_DIR / "sdxl_poster.json"
+        workflow_file = WORKFLOWS_DIR / "sdxl_poster.json"
 
         if not workflow_file.exists():
             click.echo(f"   ⚠️  Workflow not found: {workflow_file}, using placeholder")
@@ -112,105 +95,144 @@ class Pipeline:
         for i, (prompt, tagline) in enumerate(zip(image_prompts, taglines)):
             click.echo(f"   Generating poster {i+1}/3...")
 
-            # Inject prompt into workflow
-            params = self._build_poster_params(workflow, prompt, i)
-            prompt_id = self.comfy.submit_workflow(workflow, params)
+            # Build fresh copy each iteration
+            wf = ComfyUIClient._inject_params(workflow, self._build_poster_params(workflow, prompt, i))
+            prompt_id = self.comfy.submit_workflow(wf)
             self.comfy.wait_for_result(prompt_id)
             images = self.comfy.get_output_images(prompt_id, str(self.output_dir / "posters"))
-
             poster_paths.extend(images)
 
-        return poster_paths[:3]  # Ensure max 3
+        return poster_paths[:3]
 
     def _build_poster_params(self, workflow: dict, prompt: str, index: int) -> dict:
         """Build parameter overrides for poster workflow."""
         params = {}
         seeds = [42, 137, 2024]
 
-        positive_node_id = _find_positive_prompt_node(workflow)
         for node_id, node in workflow.items():
             if node.get("class_type") == "KSampler":
-                params.setdefault(node_id, {})["seed"] = seeds[index % len(seeds)]
-        if positive_node_id is not None:
-            params.setdefault(positive_node_id, {})["text"] = prompt
+                params[node_id] = {"seed": seeds[index % len(seeds)]}
+
+        # Find the positive prompt node (first CLIPTextEncode that has text and isn't negative)
+        for node_id, node in workflow.items():
+            if node.get("class_type") in ("CLIPTextEncode", "CLIPTextEncodeSDXL"):
+                inputs = node.get("inputs", {})
+                text = inputs.get("text", "")
+                # Skip negative prompt nodes (they reference negative keywords)
+                if isinstance(text, str) and "blurry" not in text.lower() and "low quality" not in text.lower():
+                    params.setdefault(node_id, {})["text"] = prompt
 
         return params
 
     def _fuse_products(self, poster_paths: list[Path]) -> list[Path]:
-        """Fuse product images into posters using IP-Adapter.
-
-        Uploads both the product image and the poster to ComfyUI's input directory,
-        then routes the product through the IPAdapter LoadImage node. The poster is
-        currently uploaded for downstream workflow extension; full poster->latent
-        conditioning requires a VAEEncode-based workflow (TODO).
-        """
+        """Fuse product images into posters using IP-Adapter."""
         workflow_file = WORKFLOWS_DIR / "sdxl_ipadapter.json"
 
         if not workflow_file.exists():
             click.echo("   ⚠️  IP-Adapter workflow not found, skipping fusion")
             return poster_paths
 
-        if not (self.brand and self.brand.product_images):
-            return poster_paths
-
         workflow = ComfyUIClient.load_workflow(str(workflow_file))
-        product_image = self.brand.product_images[0]
-        try:
-            product_uploaded = self.comfy.upload_image(product_image)
-        except Exception as e:
-            click.echo(f"   \u26a0\ufe0f  Failed to upload product image: {e}; skipping fusion")
-            return poster_paths
-
+        product_image = self.brand.product_images[0] if self.brand and self.brand.product_images else None
         fused = []
-        for i, poster in enumerate(poster_paths):
-            click.echo(f"   Fusing product {i+1}/{len(poster_paths)}...")
-            try:
-                self.comfy.upload_image(str(poster))
-            except Exception as e:
-                click.echo(f"   \u26a0\ufe0f  Failed to upload poster {poster.name}: {e}")
 
+        for i, poster in enumerate(poster_paths):
+            click.echo(f"   Fusing product {i+1}/3...")
             params = {}
             for node_id, node in workflow.items():
-                if node.get("class_type") == "LoadImage":
-                    params.setdefault(node_id, {})["image"] = product_uploaded
+                if node.get("class_type") == "LoadImage" and product_image:
+                    params.setdefault(node_id, {})["image"] = product_image
                 elif node.get("class_type") == "KSampler":
                     params.setdefault(node_id, {})["seed"] = 42 + i
 
-            prompt_id = self.comfy.submit_workflow(workflow, params)
+            wf = ComfyUIClient._inject_params(workflow, params)
+            prompt_id = self.comfy.submit_workflow(wf)
             self.comfy.wait_for_result(prompt_id)
             images = self.comfy.get_output_images(prompt_id, str(self.output_dir / "fused"))
             fused.extend(images)
 
         return fused[:3] if fused else poster_paths
 
-    def _generate_videos(self, video_prompts: list[str]) -> list[Path]:
+    def _generate_videos(self, video_prompts: list[str], poster_paths: list[Path]) -> list[Path]:
         """Generate video clips via ComfyUI."""
         if self.quality == "high":
-            click.echo("   \u26a0\ufe0f  High quality video (Wan2.1) not yet implemented, using AnimateDiff")
+            return self._generate_videos_wan(video_prompts, poster_paths)
+        else:
+            return self._generate_videos_animatediff(video_prompts)
 
+    def _generate_videos_animatediff(self, video_prompts: list[str]) -> list[Path]:
+        """Generate video clips using AnimateDiff + SDXL (fast mode)."""
         workflow_file = WORKFLOWS_DIR / "animatediff_video.json"
 
         if not workflow_file.exists():
-            click.echo("   \u26a0\ufe0f  Video workflow not found, using placeholder")
+            click.echo("   ⚠️  Video workflow not found, using placeholder")
             return self._create_placeholder_videos(video_prompts)
 
         workflow = ComfyUIClient.load_workflow(str(workflow_file))
         clip_paths = []
-        seeds = [42, 137, 2024]
-        positive_node_id = _find_positive_prompt_node(workflow)
 
         for i, vprompt in enumerate(video_prompts):
-            click.echo(f"   Generating clip {i+1}/{len(video_prompts)}...")
+            click.echo(f"   Generating clip {i+1}/3 (AnimateDiff)...")
 
             params = {}
+            seeds = [42, 137, 2024]
+            
             for node_id, node in workflow.items():
                 if node.get("class_type") == "KSampler":
-                    params.setdefault(node_id, {})["seed"] = seeds[i % len(seeds)]
-            if positive_node_id is not None:
-                params.setdefault(positive_node_id, {})["text"] = vprompt
+                    params.setdefault(node_id, {})["seed"] = seeds[i]
+                elif node.get("class_type") in ("CLIPTextEncode", "CLIPTextEncodeSDXL"):
+                    inputs = node.get("inputs", {})
+                    text = inputs.get("text", "")
+                    # Only override positive prompt (not negative)
+                    if isinstance(text, str) and "blurry" not in text.lower() and "low quality" not in text.lower():
+                        # Prepend quality boosters to the video prompt
+                        enhanced_prompt = f"{vprompt}, cinematic, 8k, masterpiece, best quality, highly detailed, sharp focus"
+                        params.setdefault(node_id, {})["text"] = enhanced_prompt
 
-            prompt_id = self.comfy.submit_workflow(workflow, params)
-            self.comfy.wait_for_result(prompt_id, max_wait=600)
+            wf = ComfyUIClient._inject_params(workflow, params)
+            prompt_id = self.comfy.submit_workflow(wf)
+            self.comfy.wait_for_result(prompt_id, max_wait=900)
+            images = self.comfy.get_output_images(prompt_id, str(self.output_dir / "clips"))
+            clip_paths.extend(images)
+
+        return clip_paths[:3]
+
+    def _generate_videos_wan(self, video_prompts: list[str], poster_paths: list[Path]) -> list[Path]:
+        """Generate video clips using Wan2.1 Image-to-Video (high quality mode)."""
+        workflow_file = WORKFLOWS_DIR / "wan_i2v_video.json"
+
+        if not workflow_file.exists():
+            click.echo("   ⚠️  Wan2.1 workflow not found, falling back to AnimateDiff")
+            return self._generate_videos_animatediff(video_prompts)
+
+        if not poster_paths:
+            click.echo("   ⚠️  No poster images for Wan2.1 I2V, falling back to AnimateDiff")
+            return self._generate_videos_animatediff(video_prompts)
+
+        workflow = ComfyUIClient.load_workflow(str(workflow_file))
+        clip_paths = []
+
+        for i, (vprompt, poster) in enumerate(zip(video_prompts, poster_paths)):
+            click.echo(f"   Generating clip {i+1}/3 (Wan2.1 I2V) — this may take 15-30 min...")
+
+            params = {}
+            seeds = [42, 137, 2024]
+
+            for node_id, node in workflow.items():
+                if node.get("class_type") == "KSampler":
+                    params.setdefault(node_id, {})["seed"] = seeds[i]
+                elif node.get("class_type") == "LoadImage":
+                    # Use the poster as input image
+                    params.setdefault(node_id, {})["image"] = str(poster)
+                elif node.get("class_type") in ("CLIPTextEncode", "CLIPTextEncodeSDXL"):
+                    inputs = node.get("inputs", {})
+                    text = inputs.get("text", "")
+                    if isinstance(text, str) and "blurry" not in text.lower():
+                        params.setdefault(node_id, {})["text"] = vprompt
+
+            wf = ComfyUIClient._inject_params(workflow, params)
+            prompt_id = self.comfy.submit_workflow(wf)
+            self.comfy.wait_for_result(prompt_id, max_wait=1800)  # 30 min max
             images = self.comfy.get_output_images(prompt_id, str(self.output_dir / "clips"))
             clip_paths.extend(images)
 
@@ -244,23 +266,16 @@ class Pipeline:
 
         # Add text overlay with primary tagline
         final = videos_dir / "final.mp4"
-        if not final.exists() or not taglines:
-            return
-
-        if not self.ffmpeg.has_drawtext():
-            click.echo("   ⚠️  ffmpeg has no drawtext filter; skipping text overlay")
-            click.echo("      Fix on macOS: brew install ffmpeg-full && export PATH=\"/opt/homebrew/opt/ffmpeg-full/bin:$PATH\"")
-            return
-
-        try:
-            tagged = videos_dir / "final_tagged.mp4"
-            brand_name = self.brand.name if self.brand else ""
-            text = f"{taglines[0]}  |  {brand_name}" if brand_name else taglines[0]
-            fontcolor = self.brand.colors[0].lstrip("#") if self.brand and self.brand.colors else "ffffff"
-            self.ffmpeg.add_text_overlay(str(final), text, str(tagged), fontcolor=fontcolor)
-            click.echo(f"   Text overlay: {tagged}")
-        except Exception as e:
-            click.echo(f"   ⚠️  Text overlay failed: {e}")
+        if final.exists() and taglines:
+            try:
+                tagged = videos_dir / "final_tagged.mp4"
+                brand_name = self.brand.name if self.brand else ""
+                text = f"{taglines[0]}  |  {brand_name}" if brand_name else taglines[0]
+                fontcolor = self.brand.colors[0].lstrip("#") if self.brand and self.brand.colors else "ffffff"
+                self.ffmpeg.add_text_overlay(str(final), text, str(tagged), fontcolor=fontcolor)
+                click.echo(f"   Text overlay: {tagged}")
+            except Exception as e:
+                click.echo(f"   ⚠️  Text overlay failed: {e}")
 
     def _create_placeholder_images(self, image_prompts: list[str], taglines: list[str]) -> list[Path]:
         """Create placeholder poster images when ComfyUI is unavailable."""
@@ -275,9 +290,7 @@ class Pipeline:
             for i, (prompt, tagline) in enumerate(zip(image_prompts, taglines)):
                 img = Image.new("RGB", (1024, 1024), colors[i % 3])
                 draw = ImageDraw.Draw(img)
-                # Draw tagline
                 draw.text((50, 450), tagline, fill="white")
-                # Draw prompt hint
                 draw.text((50, 550), prompt[:80] + "...", fill="gray")
                 path = poster_dir / f"poster_{i+1}.png"
                 img.save(str(path))

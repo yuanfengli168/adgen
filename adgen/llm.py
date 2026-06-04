@@ -12,8 +12,8 @@ Product: {product_description}{brand_context}
 
 Generate exactly 3 variations. For each variation, provide:
 1. A short tagline (5-10 words)
-2. A detailed image generation prompt (for creating an ad poster image)
-3. A short video motion prompt (for animating the poster into a video)
+2. A detailed image generation prompt (for creating an ad poster image, at least 2 sentences)
+3. A detailed video motion prompt (for animating the poster into a 5-second video clip)
 
 Respond ONLY with valid JSON in this exact format:
 {{
@@ -23,7 +23,13 @@ Respond ONLY with valid JSON in this exact format:
 }}
 
 Image prompts should describe the visual scene, style, lighting, and composition for an ad poster.
-Video prompts should describe the motion/camera movement to animate the poster (e.g., "slow zoom in, particles floating").
+Include details like: camera angle, lighting type, color palette, background, and product placement.
+
+Video prompts should describe the camera movement and scene motion for a 5-second animated clip.
+Be specific about: camera motion (zoom, pan, orbit), object motion, lighting changes, and any particle/atmospheric effects.
+Good example: "Slow cinematic dolly push-in toward the product, ambient light subtly shifts from cool blue to warm golden, soft bokeh particles float upward, gentle lens flare at the end"
+Bad example: "zoom in, particles floating"
+
 Do not include any other text outside the JSON."""
 
 

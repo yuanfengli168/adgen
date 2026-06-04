@@ -8,22 +8,22 @@
   "5": {
     "class_type": "EmptyLatentImage",
     "inputs": {
-      "width": 512,
-      "height": 512,
-      "batch_size": 16
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 32
     }
   },
   "6": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "text": "cinematic product showcase, slow zoom in, floating particles, elegant motion",
+      "text": "cinematic product showcase, slow zoom in, floating particles, elegant motion, 8k, masterpiece, best quality",
       "clip": ["4", 1]
     }
   },
   "7": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "text": "blurry, low quality, watermark, static, deformed",
+      "text": "blurry, low quality, watermark, static, deformed, ugly, pixelated, jpeg artifacts, noise, grain",
       "clip": ["4", 1]
     }
   },
@@ -35,14 +35,23 @@
       "model": ["4", 0]
     }
   },
+  "11": {
+    "class_type": "ADE_AnimateDiffUniformContextOptions",
+    "inputs": {
+      "context_length": 16,
+      "context_stride": 1,
+      "context_overlap": 4,
+      "closed_loop": false
+    }
+  },
   "3": {
     "class_type": "KSampler",
     "inputs": {
       "seed": 42,
-      "steps": 20,
-      "cfg": 7.0,
-      "sampler_name": "euler",
-      "scheduler": "normal",
+      "steps": 30,
+      "cfg": 7.5,
+      "sampler_name": "dpmpp_2m_sde_gpu",
+      "scheduler": "karras",
       "denoise": 1.0,
       "model": ["10", 0],
       "positive": ["6", 0],
@@ -61,12 +70,13 @@
     "class_type": "VHS_VideoCombine",
     "inputs": {
       "images": ["8", 0],
-      "frame_rate": 8,
+      "frame_rate": 16,
       "format": "video/h264-mp4",
       "pingpong": false,
       "save_output": true,
       "loop_count": 0,
-      "filename_prefix": "adgen/video"
+      "filename_prefix": "adgen/video",
+      "crf": 17
     }
   }
 }
