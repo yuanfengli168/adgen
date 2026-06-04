@@ -20,6 +20,16 @@ Automatically generates:
 - Mac with Apple Silicon (M1+), 32GB+ RAM recommended (64GB ideal)
 - [ComfyUI](https://github.com/comfyanonymous/ComfyUI) running locally
 - [Ollama](https://ollama.ai) with a model installed (e.g. `qwen3:32b`)
+- [FFmpeg](https://ffmpeg.org) with the `drawtext` filter (for text overlay)
+
+> **macOS Homebrew users:** the default `ffmpeg` formula does **not** ship
+> `drawtext` (libfreetype/fontconfig excluded by default). Install the
+> `ffmpeg-full` variant and put it first on your PATH:
+> ```bash
+> brew install ffmpeg-full
+> export PATH="/opt/homebrew/opt/ffmpeg-full/bin:$PATH"
+> ```
+> `adgen setup` will warn you if drawtext is missing.
 
 ## Models Used
 

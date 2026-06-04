@@ -9,7 +9,7 @@ import pytest
 from adgen.comfyui import ComfyUIClient
 from adgen.llm import LLMClient
 from adgen.pipeline import WORKFLOWS_DIR, _find_positive_prompt_node
-from adgen.postprocess import _escape_drawtext
+from adgen.postprocess import FFmpegWrapper, _escape_drawtext
 
 
 # ---------- workflow packaging ----------
@@ -221,3 +221,42 @@ class TestComfyUIClientFixes:
         assert name == "poster.png"
         call = mock_post.call_args
         assert call.args[0].endswith("/upload/image")
+
+
+# ---------- ffmpeg drawtext detection ----------
+
+class TestFFmpegDrawtextDetection:
+    def test_has_drawtext_returns_bool(self):
+        assert isinstance(FFmpegWrapper().has_drawtext(), bool)
+
+    @patch("adgen.postprocess.shutil.which", return_value=None)
+    def test_has_drawtext_false_when_no_ffmpeg(self, _mock_which):
+        assert FFmpegWrapper().has_drawtext() is False
+
+    @patch("adgen.postprocess.shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("adgen.postprocess.subprocess.run")
+    def test_has_drawtext_true_when_filter_listed(self, mock_run, _mock_which):
+        mock_run.return_value = MagicMock(
+            stdout="Filters:\n T. drawtext          V->V       Draw text using libfreetype.\n ...\n",
+            stderr="",
+        )
+        assert FFmpegWrapper().has_drawtext() is True
+
+    @patch("adgen.postprocess.shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("adgen.postprocess.subprocess.run")
+    def test_has_drawtext_false_when_filter_missing(self, mock_run, _mock_which):
+        mock_run.return_value = MagicMock(
+            stdout="Filters:\n ... scale ...\n ... overlay ...\n",
+            stderr="",
+        )
+        assert FFmpegWrapper().has_drawtext() is False
+
+    @patch("adgen.postprocess.shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("adgen.postprocess.subprocess.run", side_effect=OSError("not found"))
+    def test_has_drawtext_false_on_oserror(self, _mock_run, _mock_which):
+        assert FFmpegWrapper().has_drawtext() is False
+
+    @patch("adgen.postprocess.shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("adgen.postprocess.subprocess.run", side_effect=__import__("subprocess").TimeoutExpired(cmd="ffmpeg", timeout=10))
+    def test_has_drawtext_false_on_timeout(self, _mock_run, _mock_which):
+        assert FFmpegWrapper().has_drawtext() is False

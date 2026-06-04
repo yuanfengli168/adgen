@@ -24,6 +24,28 @@ class FFmpegWrapper:
         """Check if FFmpeg is installed."""
         return shutil.which("ffmpeg") is not None
 
+    def has_drawtext(self) -> bool:
+        """Check whether the installed ffmpeg has the drawtext filter compiled in.
+
+        Homebrew's default `ffmpeg` formula does not bundle libfreetype/fontconfig,
+        so the drawtext filter is missing. The user must install `ffmpeg-full`
+        (keg-only) and put it on PATH for text overlay to work.
+        """
+        if not self.is_available():
+            return False
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-filters"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        # Filter list contains lines like " ... drawtext          V->V       ..."
+        return any(line.lstrip().startswith(("T. drawtext", ".. drawtext", "... drawtext", "T.. drawtext"))
+                   for line in result.stdout.splitlines())
+
     def add_text_overlay(
         self,
         video_path: str,

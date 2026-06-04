@@ -84,6 +84,13 @@ def setup(download_models, comfy_url, ollama_url):
     ffmpeg = FFmpegWrapper()
     if ffmpeg.is_available():
         click.echo("✅ FFmpeg is installed")
+        if ffmpeg.has_drawtext():
+            click.echo("   ✅ drawtext filter available (text overlay enabled)")
+        else:
+            click.echo("   ⚠️  drawtext filter NOT available (text overlay will be skipped)")
+            click.echo("      Fix on macOS Homebrew:")
+            click.echo("        brew install ffmpeg-full")
+            click.echo("        export PATH=\"/opt/homebrew/opt/ffmpeg-full/bin:$PATH\"")
     else:
         click.echo("❌ FFmpeg is not installed")
         ok = False

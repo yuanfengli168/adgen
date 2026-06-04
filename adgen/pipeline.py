@@ -244,16 +244,23 @@ class Pipeline:
 
         # Add text overlay with primary tagline
         final = videos_dir / "final.mp4"
-        if final.exists() and taglines:
-            try:
-                tagged = videos_dir / "final_tagged.mp4"
-                brand_name = self.brand.name if self.brand else ""
-                text = f"{taglines[0]}  |  {brand_name}" if brand_name else taglines[0]
-                fontcolor = self.brand.colors[0].lstrip("#") if self.brand and self.brand.colors else "ffffff"
-                self.ffmpeg.add_text_overlay(str(final), text, str(tagged), fontcolor=fontcolor)
-                click.echo(f"   Text overlay: {tagged}")
-            except Exception as e:
-                click.echo(f"   ⚠️  Text overlay failed: {e}")
+        if not final.exists() or not taglines:
+            return
+
+        if not self.ffmpeg.has_drawtext():
+            click.echo("   ⚠️  ffmpeg has no drawtext filter; skipping text overlay")
+            click.echo("      Fix on macOS: brew install ffmpeg-full && export PATH=\"/opt/homebrew/opt/ffmpeg-full/bin:$PATH\"")
+            return
+
+        try:
+            tagged = videos_dir / "final_tagged.mp4"
+            brand_name = self.brand.name if self.brand else ""
+            text = f"{taglines[0]}  |  {brand_name}" if brand_name else taglines[0]
+            fontcolor = self.brand.colors[0].lstrip("#") if self.brand and self.brand.colors else "ffffff"
+            self.ffmpeg.add_text_overlay(str(final), text, str(tagged), fontcolor=fontcolor)
+            click.echo(f"   Text overlay: {tagged}")
+        except Exception as e:
+            click.echo(f"   ⚠️  Text overlay failed: {e}")
 
     def _create_placeholder_images(self, image_prompts: list[str], taglines: list[str]) -> list[Path]:
         """Create placeholder poster images when ComfyUI is unavailable."""

@@ -21,6 +21,8 @@ Fixed via `_escape_drawtext()` (escapes `\`, `:`, `'`, `%`). 6 unit tests added.
 ### ✅ 5. `add_text_overlay` fails when input has no audio
 Fixed: dropped `-codec:a copy`, replaced with `-an` (AnimateDiff outputs are silent anyway).
 
+**Companion improvement:** added `FFmpegWrapper.has_drawtext()` and pipeline now checks it before calling `add_text_overlay`. If the local ffmpeg doesn't bundle libfreetype (Homebrew's default `ffmpeg` does not), the pipeline emits a clear, actionable warning with the `brew install ffmpeg-full` fix and skips overlay gracefully. `adgen setup` also reports drawtext availability.
+
 ### ✅ 6. `wait_for_result` returns prematurely on partial output
 Fixed: now waits for `status.completed is True` or `status_str == "success"`. Test covers partial-then-complete sequence.
 
