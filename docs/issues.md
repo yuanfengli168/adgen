@@ -69,9 +69,9 @@ Untouched — works for current homogeneous outputs.
 
 ## Remaining / deferred
 
-- #2 IP-Adapter workflow redesign (img2img-style)
-- #13 PyPI publication or README correction
-- #15 Multi-product rotation
+- #2 IP-Adapter workflow redesign (img2img-style) — still open. The current IP-Adapter workflow `sdxl_ipadapter.json` takes a product image and generates from text, with the poster not actually fed in as conditioning. The pulled Wan2.1 workflow now correctly does image-to-video with the poster as the input frame.
+- #13 PyPI publication or README correction — README now says "from source" (not `pip install`).
+- #15 multi-product rotation
 - #16 Concat re-encode for safety
-- #2/#15 follow-ups: web UI logger, high-quality video (Wan2.1)
+- Web UI, multi-format export, A/B scoring, Flux 1.dev poster workflow
 
