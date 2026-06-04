@@ -156,6 +156,30 @@ class TestComfyUIClientFixes:
         assert saved[0].name == f"{prompt_id}_ComfyUI_00001_.png"
         assert saved[0].read_bytes() == b"PNGDATA"
 
+    def test_get_output_handles_video_gifs_key(self, tmp_path):
+        """VHS_VideoCombine surfaces mp4s under the 'gifs' key, not 'images'."""
+        client = ComfyUIClient()
+        prompt_id = "vid-1"
+        history_payload = {
+            prompt_id: {
+                "outputs": {
+                    "9": {
+                        "gifs": [{"filename": "video_00007.mp4", "subfolder": "adgen", "type": "output"}]
+                    }
+                }
+            }
+        }
+        with patch("adgen.comfyui.requests.get") as mock_get:
+            mock_get.side_effect = [
+                MagicMock(status_code=200, raise_for_status=lambda: None, json=lambda: history_payload),
+                MagicMock(status_code=200, raise_for_status=lambda: None, content=b"MP4DATA"),
+            ]
+            saved = client.get_output_images(prompt_id, str(tmp_path))
+
+        assert len(saved) == 1
+        assert saved[0].name == f"{prompt_id}_video_00007.mp4"
+        assert saved[0].read_bytes() == b"MP4DATA"
+
     def test_wait_for_result_returns_only_when_completed(self):
         client = ComfyUIClient()
         client.poll_interval = 0  # don't actually sleep

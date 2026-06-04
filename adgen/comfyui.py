@@ -101,13 +101,17 @@ class ComfyUIClient:
 
         saved = []
         for node_id, node_output in outputs.items():
-            images = node_output.get("images", [])
-            for img_info in images:
-                filename = img_info["filename"]
-                subfolder = img_info.get("subfolder", "")
-                img_type = img_info.get("type", "output")
+            # ComfyUI surfaces still images under "images" and animations/videos
+            # (from VHS_VideoCombine etc.) under "gifs" — even when the format
+            # is mp4. Pull from both.
+            items = list(node_output.get("images", [])) + list(node_output.get("gifs", []))
+            for item in items:
+                filename = item.get("filename")
+                if not filename:
+                    continue
+                subfolder = item.get("subfolder", "")
+                img_type = item.get("type", "output")
 
-                # Download image
                 try:
                     params = {
                         "filename": filename,
@@ -121,7 +125,7 @@ class ComfyUIClient:
                     )
                     resp.raise_for_status()
                 except requests.RequestException as e:
-                    raise RuntimeError(f"Failed to download image {filename}: {e}") from e
+                    raise RuntimeError(f"Failed to download {filename}: {e}") from e
 
                 save_path = out_dir / f"{prompt_id}_{filename}"
                 save_path.write_bytes(resp.content)
