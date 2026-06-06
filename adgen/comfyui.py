@@ -133,14 +133,19 @@ class ComfyUIClient:
 
         return saved
 
-    def upload_image(self, image_path: str, subfolder: str = "", overwrite: bool = True) -> str:
-        """Upload an image to ComfyUI's input directory. Returns the server-side filename."""
+    def upload_image(self, image_path: str, subfolder: str = "", overwrite: bool = True, target_name: str | None = None) -> str:
+        """Upload an image to ComfyUI's input directory. Returns the server-side filename.
+
+        If `target_name` is provided, the file is renamed to that name on the
+        server (useful for workflows with a hardcoded `LoadImage` filename).
+        """
         path = Path(image_path)
         if not path.exists():
             raise FileNotFoundError(f"Image not found: {image_path}")
 
+        upload_name = target_name or path.name
         with open(path, "rb") as f:
-            files = {"image": (path.name, f, "application/octet-stream")}
+            files = {"image": (upload_name, f, "application/octet-stream")}
             data = {"subfolder": subfolder, "overwrite": "true" if overwrite else "false"}
             try:
                 resp = requests.post(

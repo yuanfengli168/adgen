@@ -40,7 +40,7 @@ Automatically generates:
 | Poster Gen | SDXL (Flux workflow TODO) | ~6.5GB | Poster images |
 | Product fusion | IP-Adapter SDXL | ~1GB | Blend product/logo into scenes |
 | Video (fast) | AnimateDiff + SDXL | ~4GB | 5 s clips, 8 fps |
-| Video (high) | **Wan2.1 14B I2V** (480p, fp8) | ~16GB | 5 s clips, 16 fps — animates the actual poster |
+| Video (high) | **Wan2.1 14B I2V** (480p, GGUF Q4) | ~10.5GB | 5 s clips, 16 fps — animates the actual poster |
 
 ## Architecture
 
@@ -82,6 +82,8 @@ Automatically generates:
 
 Wan2.1 I2V (image-to-video) takes the **generated poster as the first frame** and animates from it — so the final video visually matches the poster instead of being a separate generation. Falls back to AnimateDiff if the Wan2.1 model isn't installed in ComfyUI.
 
+On Apple Silicon, use the GGUF workflow/model path for Wan2.1 high mode.
+
 You can drop the workflow files (`adgen/workflows/wan_i2v_video.json`, `animatediff_video.json`, `sdxl_poster.json`, `sdxl_ipadapter.json`) directly into the ComfyUI browser UI at `http://localhost:8188` to iterate on them manually.
 
 ## Quick Start
@@ -98,6 +100,7 @@ pip install -e ".[dev]"
 adgen setup
 adgen "Your product tagline here"
 adgen "Your product tagline here" --quality high --brand brand.json
+```
 
 ## Research
 

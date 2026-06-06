@@ -1,82 +1,91 @@
 {
-  "10": {
-    "class_type": "CheckpointLoaderSimple",
+  "37": {
+    "class_type": "UnetLoaderGGUF",
     "inputs": {
-      "ckpt_name": "Wan2.1/wan2.1_i2v_480p_14B_fp8_e4m3fn_scaled.safetensors"
+      "unet_name": "Wan2.1/wan2.1-i2v-14b-480p-Q4_K_M.gguf"
     }
   },
-  "11": {
+  "38": {
     "class_type": "CLIPLoader",
     "inputs": {
       "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
       "type": "wan"
     }
   },
-  "12": {
+  "39": {
     "class_type": "VAELoader",
     "inputs": {
       "vae_name": "wan_2.1_vae.safetensors"
     }
   },
-  "13": {
+  "49": {
     "class_type": "CLIPVisionLoader",
     "inputs": {
       "clip_name": "clip_vision_h.safetensors"
     }
   },
-  "14": {
-    "class_type": "CLIPVisionEncode",
-    "inputs": {
-      "clip_vision": ["13", 0]
-    }
-  },
-  "15": {
+  "52": {
     "class_type": "LoadImage",
     "inputs": {
-      "image": "adgen/poster_1.png"
-    }
-  },
-  "16": {
-    "class_type": "VAEEncode",
-    "inputs": {
-      "pixels": ["15", 0],
-      "vae": ["12", 0]
+      "image": "adgen_poster.png"
     }
   },
   "6": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "cinematic product showcase, slow zoom in, floating particles, elegant motion, 8k, masterpiece",
-      "clip": ["11", 0]
+      "clip": ["38", 0]
     }
   },
   "7": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "blurry, low quality, watermark, static, deformed, ugly, pixelated",
-      "clip": ["11", 0]
+      "clip": ["38", 0]
+    }
+  },
+  "51": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": ["49", 0],
+      "image": ["52", 0],
+      "crop": "center"
+    }
+  },
+  "50": {
+    "class_type": "WanImageToVideo",
+    "inputs": {
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "vae": ["39", 0],
+      "clip_vision_output": ["51", 0],
+      "start_image": ["52", 0],
+      "width": 480,
+      "height": 480,
+      "length": 81,
+      "batch_size": 1
     }
   },
   "3": {
     "class_type": "KSampler",
     "inputs": {
       "seed": 42,
-      "steps": 30,
+      "steps": 8,
       "cfg": 5.0,
       "sampler_name": "uni_pc_bh2",
       "scheduler": "normal",
       "denoise": 1.0,
-      "model": ["10", 0],
-      "positive": ["6", 0],
-      "negative": ["7", 0],
-      "latent_image": ["16", 0]
+      "model": ["37", 0],
+      "positive": ["50", 0],
+      "negative": ["50", 1],
+      "latent_image": ["50", 2]
     }
   },
   "8": {
     "class_type": "VAEDecode",
     "inputs": {
       "samples": ["3", 0],
-      "vae": ["12", 0]
+      "vae": ["39", 0]
     }
   },
   "9": {

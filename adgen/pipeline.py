@@ -1,4 +1,4 @@
-"""Pipeline orchestrator —串联 LLM → ComfyUI → FFmpeg 所有步骤."""
+"""Pipeline orchestrator: LLM -> ComfyUI -> FFmpeg."""
 
 import json
 import time
@@ -12,8 +12,21 @@ from adgen.postprocess import FFmpegWrapper
 from adgen.brand import BrandKit
 
 
-# Workflow template paths (relative to package)
-WORKFLOWS_DIR = Path(__file__).parent.parent / "workflows"
+# Workflow templates ship inside the package (declared as package data in pyproject.toml).
+WORKFLOWS_DIR = Path(__file__).parent / "workflows"
+
+
+def _find_positive_prompt_node(workflow: dict) -> str | None:
+    """Return the node id of the positive CLIPTextEncode referenced by KSampler.
+
+    Avoids the trap of also overwriting the negative prompt node.
+    """
+    for node in workflow.values():
+        if node.get("class_type") in ("KSampler", "KSamplerAdvanced"):
+            positive = node.get("inputs", {}).get("positive")
+            if isinstance(positive, list) and positive:
+                return str(positive[0])
+    return None
 
 
 class Pipeline:
@@ -209,34 +222,43 @@ class Pipeline:
             click.echo("   ⚠️  No poster images for Wan2.1 I2V, falling back to AnimateDiff")
             return self._generate_videos_animatediff(video_prompts)
 
+        # The workflow's LoadImage node hardcodes "adgen_poster.png"; upload
+        # one poster at a time with that exact name.
         workflow = ComfyUIClient.load_workflow(str(workflow_file))
+        positive_node_id = _find_positive_prompt_node(workflow)
         clip_paths = []
+        seeds = [42, 137, 2024]
 
         for i, (vprompt, poster) in enumerate(zip(video_prompts, poster_paths)):
-            click.echo(f"   Generating clip {i+1}/3 (Wan2.1 I2V) — this may take 15-30 min...")
+            click.echo(f"   Generating clip {i+1}/3 (Wan2.1 I2V) — this may take 5-20 min...")
+
+            try:
+                self.comfy.upload_image(str(poster), target_name="adgen_poster.png")
+            except TypeError:
+                # Backward compat: older client without target_name arg
+                self.comfy.upload_image(str(poster))
+            except Exception as e:
+                click.echo(f"   \u26a0\ufe0f  Failed to upload poster: {e}; skipping this clip")
+                continue
 
             params = {}
-            seeds = [42, 137, 2024]
-
             for node_id, node in workflow.items():
                 if node.get("class_type") == "KSampler":
                     params.setdefault(node_id, {})["seed"] = seeds[i]
-                elif node.get("class_type") == "LoadImage":
-                    # Use the poster as input image
-                    params.setdefault(node_id, {})["image"] = str(poster)
-                elif node.get("class_type") in ("CLIPTextEncode", "CLIPTextEncodeSDXL"):
-                    inputs = node.get("inputs", {})
-                    text = inputs.get("text", "")
-                    if isinstance(text, str) and "blurry" not in text.lower():
-                        params.setdefault(node_id, {})["text"] = vprompt
+            if positive_node_id is not None:
+                enhanced = f"{vprompt}, cinematic, 8k, masterpiece, best quality, highly detailed, sharp focus"
+                params.setdefault(positive_node_id, {})["text"] = enhanced
 
             wf = ComfyUIClient._inject_params(workflow, params)
-            prompt_id = self.comfy.submit_workflow(wf)
-            self.comfy.wait_for_result(prompt_id, max_wait=1800)  # 30 min max
-            images = self.comfy.get_output_images(prompt_id, str(self.output_dir / "clips"))
-            clip_paths.extend(images)
+            try:
+                prompt_id = self.comfy.submit_workflow(wf)
+                self.comfy.wait_for_result(prompt_id, max_wait=1800)  # 30 min
+                images = self.comfy.get_output_images(prompt_id, str(self.output_dir / "clips"))
+                clip_paths.extend(images)
+            except Exception as e:
+                click.echo(f"   \u26a0\ufe0f  Wan2.1 clip {i+1} failed: {e}")
 
-        return clip_paths[:3]
+        return clip_paths[:3] if clip_paths else self._generate_videos_animatediff(video_prompts)
 
     def _postprocess(self, clip_paths: list[Path], taglines: list[str]):
         """FFmpeg post-processing: stitch, overlay text."""

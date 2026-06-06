@@ -52,7 +52,7 @@ Cleaned: deleted from working tree, `.gitignore` already covers them.
 Still not on PyPI. Either publish or change the snippet.
 
 ### ✅ 14. Tests don't cover the new code paths
-Added `tests/test_fixes.py` with 23 tests covering: workflow packaging, positive-prompt detection, drawtext escaping, LLM JSON tolerance, filename prefixing, completion polling, upload. Total tests: **37**, all passing.
+Added `tests/test_fixes.py` with coverage for workflow packaging, positive-prompt detection, drawtext escaping, LLM JSON tolerance, filename prefixing, completion polling, upload. Current suite: **44 passing**.
 
 ### ⬜ 15. `_fuse_products` only uses `product_images[0]`
 Remaining product images are still ignored. Will revisit when the workflow gets redesigned (#2).
@@ -65,7 +65,7 @@ Untouched — works for current homogeneous outputs.
 - ✅ Mixed-language docstring in `pipeline.py` rewritten in English.
 - ✅ `__init__.py` now re-exports `Pipeline` and `BrandKit`.
 - ⬜ `pipeline.py` still uses `click.echo` directly; a logger/callback abstraction can wait for the web UI work.
-- ⬜ High-quality mode still silently falls back to fast mode.
+- 🟡 High-quality mode falls back to fast mode on Wan failures (with warning output).
 
 ## Remaining / deferred
 
