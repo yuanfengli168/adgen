@@ -10,7 +10,7 @@
 | 2. Posters (SDXL via ComfyUI) | ✅ Works | 3 posters, ~30 s each |
 | 3. Product fusion (IP-Adapter) | ⚠️ Partial | Code uploads but workflow doesn't actually VAE-encode the poster |
 | 4a. Video fast (AnimateDiff + SDXL) | ✅ Works | ~1–2 min/clip, 8 fps, 512×512 |
-| 4b. Video high (Wan2.1 14B I2V) | ⚠️ In progress | GGUF workflow now submits; full 3-clip E2E not re-validated after restart |
+| 4b. Video high (Wan2.1 14B I2V) | ⚠️ In progress | GGUF workflow migration committed; full 3-clip E2E still to re-validate after restart |
 | 5. Post-processing (stitch + drawtext) | ✅ Works | Needs `ffmpeg-full` for drawtext |
 | Tests | ✅ 44 passing | `pytest -q` |
 | Custom-node deps | ✅ Installed | `ComfyUI-GGUF` in `~/ComfyUI/custom_nodes/` |
@@ -39,6 +39,11 @@
 4. **ComfyUI `gifs` key fix** (commit `a076540`): pulls video outputs from `outputs[node]['gifs']` too (VHS_VideoCombine)
 5. **ffmpeg drawtext detection** (commit `6ee6ae9`): `FFmpegWrapper.has_drawtext()` + warn-with-fix in `adgen setup` and pipeline
 6. **Docs refresh** (commit `13f7c09`): README, design.md, issues.md all aligned with v0.2 / Wan2.1
+7. **Wan GGUF migration + handoff refresh** (commit `0015331`):
+  - `adgen/workflows/wan_i2v_video.json` moved to `UnetLoaderGGUF` + `WanImageToVideo`
+  - `adgen/pipeline.py` high-quality Wan path aligned to new workflow expectations
+  - `adgen/comfyui.py` supports upload target renaming for hardcoded workflow filenames
+  - `docs/SESSION_HANDOFF.md` added for resumable continuation
 
 ## Wan2.1 I2V — what you need to know
 
@@ -128,41 +133,19 @@ See [issues.md](issues.md) for the full list. Key open items:
 3. **#15 Multi-product rotation** — `_fuse_products` only uses `product_images[0]`.
 4. **#16 Concat re-encode** — `-c copy` is fragile.
 
-## Open uncommitted work (at handoff capture time)
+## Git state at pause point
 
-When this session ended, the following modifications were uncommitted:
-- `adgen/comfyui.py` — added `target_name` kwarg to `upload_image()`
-- `adgen/pipeline.py` — `_generate_videos_wan` rewritten to upload poster with `adgen_poster.png` target, use `_find_positive_prompt_node`, better error handling
-- `adgen/workflows/wan_i2v_video.json` — rewritten from scratch with the correct `UnetLoaderGGUF` + `WanImageToVideo` + `CLIPVisionEncode` nodes (was a stub pointing at the non-existent `wan2.1_i2v_480p_14B_fp8_e4m3fn_scaled.safetensors` and using `CheckpointLoaderSimple` which can't load Wan2.1)
+- Latest branch: `master`
+- Latest pushed commit: `0015331 fix(wan): switch high quality path to GGUF workflow and document handoff`
+- Working tree at last check: clean
 
-These three files are the main Wan2.1 GGUF migration changes that were pending at handoff capture time.
+## Resume checklist (next session)
 
-## Handoff commit instructions (for next session)
-
-```bash
-cd ~/Library/CloudStorage/OneDrive-Personal/Documents/Githubs/adgen
-
-# 1. Commit the uncommitted Wan2.1 fixes
-git add adgen/comfyui.py adgen/pipeline.py adgen/workflows/wan_i2v_video.json
-git commit -m "fix(wan): switch high-quality mode to GGUF + proper I2V workflow
-
-- wan_i2v_video.json: rewritten to use UnetLoaderGGUF + WanImageToVideo
-  + CLIPVisionEncode (was using CheckpointLoaderSimple which can't
-  load Wan2.1, plus filename didn't match the real HF repo file)
-- pipeline._generate_videos_wan: upload poster as 'adgen_poster.png'
-  (matches the LoadImage node in the workflow), use
-  _find_positive_prompt_node, fall back to AnimateDiff on error
-- comfyui.upload_image: add target_name kwarg to rename uploads
-  (workflows can hardcode the expected filename)"
-
-# 2. Update issues.md to mark #2 partially resolved
-#    (the Wan2.1 I2V workflow is now actually I2V; the IP-Adapter one isn't)
-
-# 3. Re-run end-to-end and commit the final docs (this file)
-
-# 4. Push
-git push
-```
+1. Start ComfyUI and ensure `http://localhost:8188` is reachable.
+2. Run `adgen setup` and confirm all checks are green.
+3. Run `adgen generate "top up lah" --quality high --output ./output`.
+4. Verify expected artifacts in `output/clips/` and `output/videos/`.
+5. If high-mode fails, check ComfyUI history for node/model mismatch and update `docs/issues.md` with exact error.
 
 ## Questions for the user to decide next time
 
